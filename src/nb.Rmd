@@ -1,0 +1,138 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+#
+library(tidyverse)
+library(tidyverse)
+library(readxl)
+
+# contains mapping for categories
+field_df <- read_xlsx("docs/Refinitiv ESG docs/esg_data_guide.xlsx", 
+                      sheet = "Field Description")
+
+# create interaction terms
+data <- read_xlsx("src/data/FTSE100.xlsx") %>%
+    select(-1)  #remove index
+```
+
+```{r}
+#create remapping of column names
+new_cols <- c()
+for (col in colnames(data)){
+    mapping <- ifelse(col %in% field_df$Title, subset(field_df, Title == col)$`RDP API Field Name`, col)
+    new_cols <- append(new_cols, mapping)
+}
+
+colnames(data) <- new_cols
+
+# new_cols <- sapply(colnames(data), 
+#                     ifelse(col %in% field_df$Title, subset(field_df, Title == col)$`RDP API Field Name`, col)
+# )
+
+
+# change the booleans to factors
+bool_cols <- field_df %>% 
+    filter(`RDP API Field Name` %in% colnames(data) & 
+                                     #check if data type is bool
+                                     `Data type (dt)`== "Boolean") %>%
+    pull(`RDP API Field Name`)
+data[bool_cols] <- lapply(data[bool_cols], factor) 
+
+
+#pick the odd years
+df <- data %>%
+    filter(row_number() %in% seq(1,nrow(data),2))
+
+
+
+#map title in df to title in field df
+interaction_fields <- list()
+for (pillar in c("Environmental", "Governance", "Social")){
+    # print(pillar)
+    pillar_fields <- field_df %>% 
+        filter(`RDP API Field Name` %in% colnames(df) &
+                   Pillar == pillar & 
+                   #check if title is not a controversy score
+                   !str_detect(Title, "Controv")
+               ) %>%
+        pull(`RDP API Field Name`)
+    
+    interaction_fields[[pillar]] <-  combn(pillar_fields, 2, FUN = paste, 
+                                           collapse = '*')
+}
+
+# create response 
+
+#contreversy cols
+controv.cols <- colnames(df)[str_detect(colnames(df), regex("^TR.Controv"))]
+
+#remove teh scores as its not data?
+score.cols <- colnames(df)[str_detect(colnames(df), regex("Score"))]
+
+
+unique(field_df$`Data type (dt)`)
+
+#check missing vals
+x <- df %>% 
+    select(!all_of(c(controv.cols, score.cols)))
+
+#cols to scale
+scale_cols <- field_df %>% 
+    filter(`RDP API Field Name` %in% colnames(data) & 
+               #check if data type is bool
+               `Data type (dt)`== "Float") %>%
+    pull(`RDP API Field Name`)
+data[bool_cols] <- lapply(data[bool_cols], factor) 
+
+
+
+
+#drop cols with no values
+
+
+
+y <- rowSums(df[,controv.cols], na.rm= TRUE)
+
+hist(y)
+
+
+interaction_fields$Environmental[1:10]
+# replace with whole string
+
+linear_pred <- paste(interaction_fields$Environmental[1:4], sep = " " , collapse = " + ")
+f <- paste("TR.TRESGCControversiesScore","~ ", linear_pred )
+lm(f , data = df)
+
+
+
+#cols with 1 value?
+
+
+
+
+#create xmatrix for lasso
+
+
+
+#create a 
+
+
+#fit lasso
+
+#fit spike and slab
+
+# fit xgboost
+
+#design simulation
+
+
+hist(df$`ESG Controversies Score`
+     )
+
+
+
+
+```
