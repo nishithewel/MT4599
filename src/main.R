@@ -477,7 +477,7 @@ library(spikeSlabGAM)
 
 
 mcmc <- list(
-  nChains = 4, chainLength = 1000, burnin = 500,
+  nChains = 4, chainLength = 5`000, burnin = 500,
   thin = 5
 )
 
