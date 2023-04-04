@@ -2,7 +2,6 @@ library(glmnet) ###
 library(tidyverse)
 library(readxl)
 library(spikeSlabGAM)
-library(C50)
 library(caret)
 library(spikeslab)
 library(pROC)
@@ -12,9 +11,13 @@ main <- function() {
     complete_df <- loader()
 
 
-    # fit lasso models
-    # store lasso models
-    lasso_models <- list() # is the number of cases
+   
+    # store lasso models in a list
+    lasso_models <- list()
+    # store tree models in a list
+    tree_models <- list()
+    # store spike models in a list
+    spike_models <- list()
 
     # creates matrices for glmnets on 3 cases
     xmats <- create_linear_predictor(complete_df)
@@ -22,40 +25,20 @@ main <- function() {
 
     for (i in 1:length(xmats)) {
         # fit the lasso model
-        cvlasso <- cv.glmnet(xmats[[i]],
-            as.factor(y),
-            family = "binomial",
-            # type.measure = "class"
-            type.measure = "auc",
-            alpha = 1, # this indicates the lasso part
-            nfolds = 5,
-            # becasume we scaled earlier
-            standardize = T,
-            # should set up the lambda values,
-            keep = TRUE
-        )
-
-        # lasso_models <- append(lasso_models, cvlasso)
+        cvlasso <- fit.lasso(y = y, x = xmats[[i]])
         lasso_models[[i]] <- cvlasso
+
+        # fit the tree model
+        tree_mod <- fit.tree(y = y, x = xmats[[i]])
+        tree_models[[i]] <- tree_mod
+
+        # fit the spike model, tuning might be required
+        spike_mod <- fit.spike(y = y, x = xmats[[i]])
+        spike_models[[i]] <- spike_mod
+    
+
     }
 
-
-    # p <- predict(tree_mod, newdata = complete_df %>% select(-y)%>%
-    # mutate_if(is.logical, as.factor)
-    # )
-
-    # In most implementations, the default value for mtry is p–√
-    # , where p is the number of variables in the dataset. However, for datasets
-    # with a large number of variables, a larger value is required to capture more
-    # relevant variables [3]. C5
-    rrf <- fit.rrf(xmats[[i]], y = y)
-
-    # fit spike slab gam
-
-
-
-
-    # get auc, confusion matrices stats from all models
 }
 
 
@@ -257,7 +240,7 @@ test_fit.rss <- function() {
 }
 
 
-fit.ss <- function(y, x) {
+fit.ss <- function(y, x, print = FALSE) {
     # check if y is factor using stopifnot
     stopifnot(is.factor(y))
 
@@ -266,7 +249,7 @@ fit.ss <- function(y, x) {
         y = y,
         n.rep = 3,
         # testing
-        verbose = TRUE
+        verbose = print
     )
 
     # confusion matrix

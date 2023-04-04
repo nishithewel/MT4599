@@ -6,7 +6,8 @@ library(tidyr)
 library(arm)
 # do a rep call
 library(glmnet)
-
+library(foreach)
+library(doParallel)
 source("models.R")
 
 
@@ -117,9 +118,9 @@ extract_rrf <- function(results) {
     # get the mean and sd of the FP and FN
     # within results
     cnfs <- results$confs
-    FP <- sapply(cnfs, function(x) x$FP)
-    FN <- sapply(cnfs, function(x) x$FN)
-    # return auc, and FP and FN
+    FP <- cnfs$FP
+    FN <- cnfs$FN
+    # return auc, and FP and F
     return(list(
         auc = auc,
         FP = FP,
@@ -158,9 +159,95 @@ calc_summary <- function(results) {
     ))
 }
 
+fit.models <- function(sim) {
+    l <- list()
+
+    cvlasso <- fit.lasso(
+        y = sim$y,
+        x = sim$x
+    )
 
 
-main <- function() {
+    cnfs_lasso <- coeff_confusion(
+        sim$tru_features,
+        cvlasso$selected_features
+    )
+
+    l$lasso <- list(
+        auc = cvlasso$auc,
+        confs = cnfs_lasso,
+        model = "lasso"
+    )
+
+    dimnames(sim$x) <- list(NULL, paste0(1:ncol(sim$x)))
+
+    rrf <- fit.rrf(
+        y = sim$y,
+        x = sim$x
+    )
+    cnfs_rrf <- coeff_confusion(
+        sim$tru_features,
+        rrf$selected_features
+    )
+
+    l$rrf <- list(
+        auc = rrf$auc,
+        confs = cnfs_rrf,
+        model = "rrf"
+    )
+
+    # fit ss model
+    ss <- fit.ss(
+        y = sim$y,
+        x = sim$x
+    )
+    cnfs_ss <- coeff_confusion(
+        sim$tru_features,
+        ss$selected_features
+    )
+
+    l$ss <- list(
+        auc = ss$auc,
+        confs = cnfs_ss,
+        model = "ss"
+    )
+    return(l)
+}
+
+analyse_sim_df <- function(df) {
+
+}
+
+
+modelout_to_df <- function(model_output) {
+    df <- data.frame(
+        iter = integer(),
+        FP = integer(),
+        FN = integer(),
+        auc = double(),
+        model = character()
+    )
+    N_iter <- length(model_output)
+    for (i in seq(1:N_iter)) {
+        for (j in seq_along(model_output[[i]])) {
+            # extract the results
+            res <- extract_rrf(model_output[[i]][[j]])
+            # store the results in a data frame
+            df <- rbind(df, data.frame(
+                iter = i,
+                FP = res$FP,
+                FN = res$FN,
+                auc = res$auc,
+                model = names(model_output[[i]])[j]
+            ))
+        }
+    }
+    return(df)
+}
+
+# run_sim_parallel <- funct
+
+run_sim_loop <- function() {
     # run the simuluator
     N_iter <- 2 # 5 # iterations
 
@@ -229,78 +316,135 @@ main <- function() {
             FN = cnfs_rrf$FN,
             auc = rrf$auc, model = "rrf"
         )
-        # log <- append(log, list(
-        #     iter = i, FP = cnfs_lasso$FP,
-        #     FN = cnfs_lasso$FN,
-        #     auc = cvlasso$auc, model = "rrf"
-        # ))
 
-        # fit ssgam
+        # fit ss model
+        ss <- fit.ss(
+            y = sim$y,
+            x = sim$x
+        )
+        cnfs_ss <- coeff_confusion(
+            sim$tru_features,
+            ss$selected_features
+        )
+        df <- df %>% add_row(
+            iter = i, FP = cnfs_ss$FP,
+            FN = cnfs_ss$FN,
+            auc = ss$auc, model = "ss"
+        )
     }
     return(df)
 }
 
-res <- main()
-# _i,res <- main()
+run_sim_vector_parallel <- function(
+    n = 100, p = 1000, q = 6,
+    N_iter = 5, numCores = 4) {
+    # returns df of sim results
+    # run the simuluator
+    # N_iter <- 2 # 5 # iterations
+
+    # p <- c(500,1000,10000)
+    # p <- 1000
+    # n <- 100
+    set.seed(1000)
+
+    # diagnostics
+
+    # call sim.norm n_iter times vectorized
+    # store the results in a list
+
+    sims <- lapply(seq(1:N_iter), function(x) {
+        sim.norm(n, p, q)
+    })
+
+    registerDoParallel(numCores - 1) # use multicore, set to the number of our cores
+
+    # loads packages for clusters
+    packs <- c("MASS", "Matrix", "arm", "glmnet", "caret", "spikeslab", "pROC")
+    model_output <- foreach(
+        i = sims,
+        .packages = packs,
+        .export = ls(globalenv())
+        #  c("sim.norm", "fit.models")
+    ) %dopar% {
+        sim <- sim.norm(n = 100, p = 1000, q = 6)
+        fit.models(sim)
+    }
+    stopImplicitCluster()
 
 
-#
-#
-# cvlasso <- cv.glmnet(sim$x,
-#                      as.factor(sim$y),
-#                      family = "binomial",
-#                      # type.measure = "class"
-#                      type.measure = "auc",
-#
-#                      alpha = 1, #this indicates the lasso part
-#                      nfolds = 5,
-#                      #becasume we scaled earlier
-#                      standardize = F,
-#                      #should set up the lambda values,
-#                      keep = TRUE
-# )
-# lambda <- cvlasso$lambda.min
-#
-# idmin = match(cvlasso$lambda.min, cvlasso$lambda)
-# cnf <- confusion.glmnet(cvlasso, newx = sim$x, newy = sim$y) #[[idmin]]
-# print(cnf)
-#
-# plot(cvlasso)
-#
-# beta <- coef(cvlasso, s = "lambda.min")
-# #view non-zero coefs
-# beta[beta[,1]!=0,]
-#
-# # In contrast, glmnet multiplies the first
-# # term by a factor of 1/n. So after running glmnet, to
-# # extract the beta corresponding to a value lambda, you need to
-# beta = coef(cvlasso, s=lambda/n)
-#
-# library(selectiveInference)
-#
-# fixedLassoInf(sim$x,
-#               as.numeric(sim$y),
-#               family = "binomial",
-#               beta = beta,
-#               lambda = lambda)
-#
-# #TODO
-#
-#
-# library(spikeSlabGAM)
-# lp <- paste(unlist(colnames(x_no_missing)),sep = " ", collapse = " + ")
-#
-# f1 <- paste("y ~", lp)
-#
-# f1
-#
-#
-# mcmc <- list(nChains = 8, chainLength = 1000, burnin = 500,
-#              + thin = 5)
-#
-# m <- spikeSlabGAM(formula = formula( y ~ .),
-#                   data = cb,
-#                   family = "binomial",
-#                   mcmc = mcmc)
-#
-# summary(m)
+    df <- modelout_to_df(model_output)
+    return(df)
+}
+
+# main section but run in global env because of issues with foreach
+# main <- function() {
+
+
+
+set.seed(1000)
+
+# diagnostics
+
+# call sim.norm n_iter times vectorized
+# store the results in a list
+
+N_iter <- 500
+n = 100
+# num_preds <- c(500, 1000, 10000)
+q <- 6
+
+numCores <- 4
+
+sims <- list()
+for (p in c(500, 1000)) {
+    sims[[p]] <- lapply(seq(1:N_iter), function(x) {
+        sim.norm(n, p, q)
+    })
+    print(paste("done with", p))
+}
+# sims[[10000]] <- lapply(seq(1:(N_iter/5)), function(x) {
+#     sim.norm(n, p = 10000, q)
+# })
+# print("done with 10000")
+
+
+
+registerDoParallel(numCores - 1) # use multicore, set to the number of our cores
+
+# loads packages for clusters
+packs <- c("MASS", "Matrix", "arm", "glmnet", "caret", "spikeslab", "pROC")
+
+try(
+    model_output <- foreach(
+        i = sims,
+        .packages = packs
+        # .export = ls(globalenv())
+        #  c("sim.norm", "fit.models")
+    ) %dopar% {
+        # sim <- sim.norm(n = 100, p = 1000, q = 6)
+        fit.models(i)
+        # length(i)
+    },
+    silent = TRUE
+)
+
+
+stopImplicitCluster()
+
+df <- modelout_to_df(model_output)
+
+df$p  <- c(rep(500, 500), rep(1000, 500), rep(10000, 100))
+# save df to file as rda
+saveRDS(df, "df.rda")
+
+# group by model and summarise to get mean and standard deviation
+summarydf <- df %>%
+    group_by(p ,model) %>%
+    summarise(
+        FP_mean = mean(FP), FP_sd = sd(FP),
+        FN_mean = mean(FN), FN_sd = sd(FN),
+        auc_mean = mean(auc), auc_sd = sd(auc)
+    )
+# write to csv
+write.csv(<-, "data/summarydf.csv")
+
