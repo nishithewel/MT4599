@@ -3,7 +3,8 @@
 library(MASS)
 #
 library(tidyr)
-library(arm)
+# library(arm)
+library(boot)
 # do a rep call
 library(glmnet)
 library(foreach)
@@ -11,12 +12,7 @@ library(doParallel)
 source("models.R")
 
 
-# tru_beta <- sapply(rnorm(p), function(x) ifelse(abs(x) < 1.96, 0, x))
-# tru_beta
 
-
-
-# y <-   x %*% tru_beta + matrix(rnorm(n), nrow = n)
 
 # needs to be binary output
 # needs to have covarianve matrix
@@ -25,6 +21,10 @@ source("models.R")
 
 sim.norm <- function(n, p, q, corrBlockSize = 50) {
     # covariance matrix
+
+    #check if p is at least 1000 using stopif
+    stopifnot(p >= 500)
+
 
     sigma <- matrix(
         rep(0.7, corrBlockSize * corrBlockSize),
@@ -43,8 +43,8 @@ sim.norm <- function(n, p, q, corrBlockSize = 50) {
     # append to samples with interactions
 
     # columns to be used to create interactions
-    interaction_locs <-
-        tru_beta <- rep(0, p)
+    # interaction_locs <-
+    tru_beta <- rep(0, p)
 
     # this seems arb
 
@@ -61,15 +61,20 @@ sim.norm <- function(n, p, q, corrBlockSize = 50) {
 
     # add the tru beta coeffs for interactions at the end
 
+    mat_mul <- samples %*% as.matrix(tru_beta)
 
 
-
-    prob <- invlogit(
-        samples %*% as.matrix(tru_beta)
-        # include interaction
-        # + samples[some_index]*inter_beta
+    prob <- sapply(
+        mat_mul,
+        function(x) exp(x) / (1 + exp(x))
     )
 
+    # prob2 <- boot::inv.logit(
+    #     samples %*% as.matrix(tru_beta)
+    #     # include interaction
+    #     # + samples[some_index]*inter_beta
+    # )
+    # stopifnot(all.equal(prob, prob2))
     # y <- ifelse(p > 0.5, 1, 0)
     y <- rbinom(n = n, size = 1, prob = prob)
     y <- as.factor(y)
@@ -80,7 +85,7 @@ sim.norm <- function(n, p, q, corrBlockSize = 50) {
     ))
 }
 
-
+# sim.norm(10, 1000, 6)
 
 coeff_confusion <- function(tru_coeffs, active_coeffs) {
     # given true
@@ -335,44 +340,77 @@ run_sim_loop <- function() {
     return(df)
 }
 
-run_sim_vector_parallel <- function(
+#vectorise run_sim_loop
+
+
+run_sim_parallel <- function(
     n = 100, p = 1000, q = 6,
-    N_iter = 5, numCores = 4) {
+    N_iter = 5, parallel = F) {
     # returns df of sim results
     # run the simuluator
-    # N_iter <- 2 # 5 # iterations
+    N_iter <- 2 # 5 # iterations
 
-    # p <- c(500,1000,10000)
-    # p <- 1000
-    # n <- 100
-    set.seed(1000)
+    N_iter <- 500
+    n <- 100
+    # num_preds <- c(500, 1000, 10000)
+    q <- 6
 
-    # diagnostics
 
-    # call sim.norm n_iter times vectorized
-    # store the results in a list
 
-    sims <- lapply(seq(1:N_iter), function(x) {
-        sim.norm(n, p, q)
-    })
+    sims <- list()
+    for (p in c(500, 1000)) {
+        sims[[p]] <- lapply(seq(1:N_iter), function(x) {
+            sim.norm(n, p, q)
+        })
+        print(paste("done with", p))
+    }
+    # sims[[10000]] <- lapply(seq(1:(N_iter/5)), function(x) {
+    #     sim.norm(n, p = 10000, q)
+    # })
+    # print("done with 10000")
+
+
 
     registerDoParallel(numCores - 1) # use multicore, set to the number of our cores
 
     # loads packages for clusters
     packs <- c("MASS", "Matrix", "arm", "glmnet", "caret", "spikeslab", "pROC")
-    model_output <- foreach(
-        i = sims,
-        .packages = packs,
-        .export = ls(globalenv())
-        #  c("sim.norm", "fit.models")
-    ) %dopar% {
-        sim <- sim.norm(n = 100, p = 1000, q = 6)
-        fit.models(sim)
-    }
+
+    try(
+        model_output <- foreach(
+            i = sims,
+            .packages = packs
+            # .export = ls(globalenv())
+            #  c("sim.norm", "fit.models")
+        ) %dopar% {
+            # sim <- sim.norm(n = 100, p = 1000, q = 6)
+            fit.models(i)
+            # length(i)
+        },
+        silent = TRUE
+    )
+
+
     stopImplicitCluster()
 
-
     df <- modelout_to_df(model_output)
+
+    df$p <- c(rep(500, 500), rep(1000, 500), rep(10000, 100))
+    # save df to file as rda
+    saveRDS(df, "df.rda")
+
+    # group by model and summarise to get mean and standard deviation
+    summarydf <- df %>%
+        group_by(p, model) %>%
+        summarise(
+            FP_mean = mean(FP), FP_sd = sd(FP),
+            FN_mean = mean(FN), FN_sd = sd(FN),
+            auc_mean = mean(auc), auc_sd = sd(auc)
+        )
+    # write to csv
+    write.csv(, "data/summarydf.csv")
+
+
     return(df)
 }
 
@@ -381,70 +419,69 @@ run_sim_vector_parallel <- function(
 
 
 
-set.seed(1000)
+# set.seed(1000)
 
-# diagnostics
+# # diagnostics
 
-# call sim.norm n_iter times vectorized
-# store the results in a list
+# # call sim.norm n_iter times vectorized
+# # store the results in a list
 
-N_iter <- 500
-n = 100
-# num_preds <- c(500, 1000, 10000)
-q <- 6
+# N_iter <- 500
+# n = 100
+# # num_preds <- c(500, 1000, 10000)
+# q <- 6
 
-numCores <- 4
+# numCores <- 4
 
-sims <- list()
-for (p in c(500, 1000)) {
-    sims[[p]] <- lapply(seq(1:N_iter), function(x) {
-        sim.norm(n, p, q)
-    })
-    print(paste("done with", p))
-}
-# sims[[10000]] <- lapply(seq(1:(N_iter/5)), function(x) {
-#     sim.norm(n, p = 10000, q)
-# })
-# print("done with 10000")
-
-
-
-registerDoParallel(numCores - 1) # use multicore, set to the number of our cores
-
-# loads packages for clusters
-packs <- c("MASS", "Matrix", "arm", "glmnet", "caret", "spikeslab", "pROC")
-
-try(
-    model_output <- foreach(
-        i = sims,
-        .packages = packs
-        # .export = ls(globalenv())
-        #  c("sim.norm", "fit.models")
-    ) %dopar% {
-        # sim <- sim.norm(n = 100, p = 1000, q = 6)
-        fit.models(i)
-        # length(i)
-    },
-    silent = TRUE
-)
+# sims <- list()
+# for (p in c(500, 1000)) {
+#     sims[[p]] <- lapply(seq(1:N_iter), function(x) {
+#         sim.norm(n, p, q)
+#     })
+#     print(paste("done with", p))
+# }
+# # sims[[10000]] <- lapply(seq(1:(N_iter/5)), function(x) {
+# #     sim.norm(n, p = 10000, q)
+# # })
+# # print("done with 10000")
 
 
-stopImplicitCluster()
 
-df <- modelout_to_df(model_output)
+# registerDoParallel(numCores - 1) # use multicore, set to the number of our cores
 
-df$p  <- c(rep(500, 500), rep(1000, 500), rep(10000, 100))
-# save df to file as rda
-saveRDS(df, "df.rda")
+# # loads packages for clusters
+# packs <- c("MASS", "Matrix", "arm", "glmnet", "caret", "spikeslab", "pROC")
 
-# group by model and summarise to get mean and standard deviation
-summarydf <- df %>%
-    group_by(p ,model) %>%
-    summarise(
-        FP_mean = mean(FP), FP_sd = sd(FP),
-        FN_mean = mean(FN), FN_sd = sd(FN),
-        auc_mean = mean(auc), auc_sd = sd(auc)
-    )
-# write to csv
-write.csv(<-, "data/summarydf.csv")
+# try(
+#     model_output <- foreach(
+#         i = sims,
+#         .packages = packs
+#         # .export = ls(globalenv())
+#         #  c("sim.norm", "fit.models")
+#     ) %dopar% {
+#         # sim <- sim.norm(n = 100, p = 1000, q = 6)
+#         fit.models(i)
+#         # length(i)
+#     },
+#     silent = TRUE
+# )
 
+
+# stopImplicitCluster()
+
+# df <- modelout_to_df(model_output)
+
+# df$p  <- c(rep(500, 500), rep(1000, 500), rep(10000, 100))
+# # save df to file as rda
+# saveRDS(df, "df.rda")
+
+# # group by model and summarise to get mean and standard deviation
+# summarydf <- df %>%
+#     group_by(p ,model) %>%
+#     summarise(
+#         FP_mean = mean(FP), FP_sd = sd(FP),
+#         FN_mean = mean(FN), FN_sd = sd(FN),
+#         auc_mean = mean(auc), auc_sd = sd(auc)
+#     )
+# # write to csv
+# write.csv(<-, "data/summarydf.csv")

@@ -1,17 +1,22 @@
 library(glmnet) ###
 library(tidyverse)
 library(readxl)
-library(spikeSlabGAM)
+# library(spikeSlabGAM)
 library(caret)
 library(spikeslab)
 library(pROC)
+source("helper.R")
+source("sparsePC.R")
 
 main <- function() {
     # load data
     complete_df <- loader()
 
+    # scale the numeric columns in the df
+    complete_df <- complete_df %>%
+        mutate(across(where(is.numeric), scale))
 
-   
+
     # store lasso models in a list
     lasso_models <- list()
     # store tree models in a list
@@ -21,25 +26,62 @@ main <- function() {
 
     # creates matrices for glmnets on 3 cases
     xmats <- create_linear_predictor(complete_df)
+
+    # find columns with only 0 or 1
+
+
+    #
+
+
+
+
+
+
+
     y <- complete_df$y
 
-    for (i in 1:length(xmats)) {
+    # turn xmat colnames to numbers for each xmat in xmats
+    for (i in seq_along(xmats)) {
+        colnames(xmats[[i]]) <- seq(ncol(xmats[[i]]))
+    }
+
+    # remove columns with constant values in xmat
+    xmats <- lapply(
+        xmats,
+        function(x) x[, apply(x, 2, function(x) length(unique(x)) > 1)]
+    )
+    # remove columns with zero variance in xmat
+    xmats <- lapply(
+        xmats,
+        function(x) x[, apply(x, 2, function(x) var(x) > 0.01)]
+    )
+
+
+
+    for (i in seq_along(xmats)) {
         # fit the lasso model
         cvlasso <- fit.lasso(y = y, x = xmats[[i]])
         lasso_models[[i]] <- cvlasso
 
-        # fit the tree model
-        tree_mod <- fit.tree(y = y, x = xmats[[i]])
-        tree_models[[i]] <- tree_mod
+        # turn xmat colnames to numbers
+        # colnames(xmats[[i]]) <- seq(ncol(xmats[[i]]))
+
+        # fit rff model
+
+        rrf_mod <- fit.rrf(y = y, x = xmats[[i]])
+        tree_models[[i]] <- rrf_mod
 
         # fit the spike model, tuning might be required
-        spike_mod <- fit.spike(y = y, x = xmats[[i]])
+
+
+        spike_mod <- fit.ss(y = y, x = xmats[[i]])
+        # sparsePC.spikeslab()
         spike_models[[i]] <- spike_mod
-    
-
     }
-
 }
+
+
+
 
 
 loader <- function() {
@@ -240,18 +282,63 @@ test_fit.rss <- function() {
 }
 
 
+fit.fixedss <- function(y, x, print = FALSE) {
+    # check if y is factor using stopifnot
+    stopifnot(is.factor(y))
+
+    ss <- fixedSparsePC(
+        x = x,
+        y = y,
+        n.rep = 1,
+        # testing
+        verbose = print
+    )
+    # sparsePC.spikeslab()
+    # sparsePC(x = x_ss, y = y, n.rep = 3, verbose = T)
+    # confusion matrix
+    # cnf <- confusionMatrix(yhat.gnet, y)
+    # cnf
+    # yhat.gnet <- spikeslab::predict(obj, x = x)$yhat.gnet
+
+    # get the selected features
+
+    selected_features <- ss[["gene.signature"]]
+
+    rf <- ss$rf.object
+
+    # yhat.gnet = predict(rf, x = x)
+
+    # calculated roc using rf
+    rf.roc <- roc(
+        response = y,
+        predictor = rf$votes[, 2]
+    )
+    # plot(rf.roc)
+    rf.auc <- auc(rf.roc)
+    # get value of auc
+
+
+
+    # return the model and the selected features and auc
+    return(list(
+        model = ss,
+        selected_features = selected_features,
+        auc = rf.auc[1]
+    ))
+}
 fit.ss <- function(y, x, print = FALSE) {
     # check if y is factor using stopifnot
     stopifnot(is.factor(y))
 
-    ss <- sparsePC.spikeslab(
+    ss <- spikeslab::sparsePC(
         x = x,
         y = y,
-        n.rep = 3,
+        n.rep = 1,
         # testing
         verbose = print
     )
-
+    # sparsePC.spikeslab()
+    # sparsePC(x = x_ss, y = y, n.rep = 3, verbose = T)
     # confusion matrix
     # cnf <- confusionMatrix(yhat.gnet, y)
     # cnf
