@@ -12,13 +12,6 @@ library(doParallel)
 source("models.R")
 
 
-
-
-# needs to be binary output
-# needs to have covarianve matrix
-
-
-
 sim.norm <- function(n, p, q, corrBlockSize = 50) {
     # covariance matrix
 

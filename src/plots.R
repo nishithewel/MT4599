@@ -5,10 +5,6 @@
 
 library(ggplot2)
 library(gridExtra)
-plot_MC <- function() {
-
-}
-
 
 load(".Rdata")
 
@@ -161,3 +157,33 @@ ggsave(
 )
 
 
+
+
+## creates results summary
+
+
+model_summary <- lapply(model_output, function(df) extract_models_obj(df))
+df <- do.call("rbind", model_summary)
+results_df <- df %>% group_by(case, model) %>%
+    summarise(
+        auc_mean = mean(auc), auc_sd = sd(auc),
+        num_features_mean = mean(num_features),
+        num_features_sd = sd(num_features)
+    )
+write.csv(results_df, "data/resultsdf.csv")
+
+
+#
+
+top_columns <- lapply(model_output, function(x )extract_feature_names)
+
+for (model_type in seq_along(models)) {
+    # for a given xmat, find the names choosen by each model
+    select_feature_names_list <- lapply()
+}
+
+selected_feat_by_model <- lapply(1:5, 
+                                 function(x) top_columns[[x]][["lasso"]][[3]][["selected_features_names"]])
+# find intersection of selected_fet_by_model
+intersected_features <- Reduce(intersect, selected_feat_by_model)
+intersected_features
