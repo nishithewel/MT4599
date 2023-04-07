@@ -1,13 +1,13 @@
 library(glmnet) ###
 library(tidyverse)
 library(readxl)
-# library(spikeSlabGAM)
+
 library(snow)
 library(caret)
 library(spikeslab)
 library(pROC)
 source("helper.R")
-source("sparsePC.R")
+
 
 
 
@@ -50,7 +50,7 @@ main <- function() {
         # fit the lasso model
         cvlasso <- fit.lasso(y = y, x = xmats[[i]])
         lasso_models[[i]] <- cvlasso
-
+        print("fitted lasso")
         # turn xmat colnames to numbers
         # colnames(xmats[[i]]) <- seq(ncol(xmats[[i]]))
 
@@ -58,7 +58,7 @@ main <- function() {
 
         rrf_mod <- fit.rrf(y = y, x = xmats[[i]])
         tree_models[[i]] <- rrf_mod
-
+        print("fitted rff")
         spike_mod <- fit.ss(y = y, x = xmats[[3]])
         spike_models <- append(spike_models, spike_mod)
     }
@@ -73,21 +73,7 @@ main <- function() {
     )
 
     # extract selected features from model in models
-    for (j in seq_along(models)) {
-        for (i in seq_along(models[[j]])) {
-            # extract selected features from model in models
-            selected_features <- models[[j]][[i]][["selected_features"]]
-            # print 1st 5 selected features
-            print(selected_features[1:10])
 
-            # map selected features to their names
-            selected_features_names <- col_names[[i]][selected_features]
-            print(selected_features_names[1:10])
-            models[[j]][[i]][["selected_features_names"]] <- selected_features_names
-            # save selected features to file
-            # saveRDS(selected_features, paste0("data/selected_features_", model, "_", i, ".Rda"))
-        }
-    }
     models[[1]][[1]]
 
 
@@ -142,11 +128,76 @@ main <- function() {
     write.csv(results, "data/results.csv")
 }
 
+extract_feature_names <- function(models){
+    # given a collection of models fitted onto 1 complete dataset 
+    #extract th
+    for (j in seq_along(models)) {
+        for (i in seq_along(models[[j]])) {
+            # extract selected features from model in models
+            selected_features <- models[[j]][[i]][["selected_features"]]
+            # print 1st 5 selected features
+            print(selected_features[1:10])
+            
+            # map selected features to their names
+            selected_features_names <- col_names[[i]][selected_features]
+            print(selected_features_names[1:10])
+            models[[j]][[i]][["selected_features_names"]] <- selected_features_names
+            # save selected features to file
+            # saveRDS(selected_features, paste0("data/selected_features_", model, "_", i, ".Rda"))
+        }
+    }
+}
+
+
+
+fit.models.par <- function(xmats, y) {
+    #fits models to be run in parallel given y and matrices 
+    
+    
+    
+    lasso_models <- list()
+    # store tree models in a list
+    tree_models <- list()
+    # store spike models in a list
+    spike_models <- list()
+    
+    
+    
+    # turn xmat colnames to numbers for each xmat in xmats
+    for (i in seq_along(xmats)) {
+        colnames(xmats[[i]]) <- seq(ncol(xmats[[i]]))
+    }
+    
+    xmats <- lapply(
+        xmats,
+        function(x) x[, apply(x, 2, function(x) var(x) > 0.01 | var(x) == Inf)]
+    )
+    
+    for (i in seq_along(xmats)) {
+        # fit the lasso model
+        cvlasso <- fit.lasso(y = y, x = xmats[[i]])
+        lasso_models[[i]] <- cvlasso
+        print("done lasso")
+        rrf_mod <- fit.rrf(y = y, x = xmats[[i]])
+        tree_models[[i]] <- rrf_mod
+        print("done rff")
+        spike_mod <- fit.ss(y = y, x = xmats[[3]])
+        spike_models <- append(spike_models, spike_mod)
+    }
+    
+    models <- list(
+        lasso = lasso_models,
+        tree = tree_models,
+        spike = spike_models
+    )
+    return(models)
+}
 
 
 
 
-loader <- function() {
+
+loader <- function(i=1) {
     # load dataset from rds
     load("data.Rda")
 
@@ -154,7 +205,7 @@ loader <- function() {
     # for (df in imputed_dfs){}
 
     # keep only complete cases
-    df <- imputed_dfs[[1]]
+    df <- imputed_dfs[[i]]
 
     complete_df <- df[complete.cases(df), ]
     # complete_df <- cbind(y, complete_df)
@@ -259,7 +310,7 @@ fit.rrf <- function(y, x, optimise = F) {
         classProbs = TRUE,
         summaryFunction = twoClassSummary,
         # verboseIter = TRUE,
-        allowParallel = TRUE
+        # allowParallel = TRUE
     )
     levels(y) <- c("no_cont", "cont")
     # add grid to conduct cv over
@@ -388,7 +439,7 @@ fit.ss <- function(y, x, print = FALSE) {
         n.rep = 1,
         # testing
         verbose = print,
-        parallel = T
+        # parallel = T
     )
     # sparsePC.spikeslab()
     # sparsePC(x = x_ss, y = y, n.rep = 3, verbose = T)

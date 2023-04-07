@@ -2,6 +2,7 @@ library(tidyverse)
 library(readxl)
 library(naniar)
 library(mice)
+library(glmnet)
 
 source("helper.R")
 
@@ -11,7 +12,7 @@ main <- function() {
   # load dataframes
 
   # contains mapping for categories
-  field_df <- read_xlsx("../docs/Refinitiv ESG docs/esg_data_guide.xlsx",
+  field_df <- read_xlsx("data/esg_data_guide.xlsx",
     sheet = "Field Description"
   )
 
@@ -102,7 +103,7 @@ main <- function() {
 
 
   # run the mice function, returns (list) of imputed dataframes
-  m <-  2
+  m <-  5
   imputed_dfs <- run_mice(df,m = m)
   
   

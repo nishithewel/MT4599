@@ -140,7 +140,7 @@ create_linear_predictor <- function(df) {
 
 
     # case 2: Withi pillar interactions
-    field_df <- read_xlsx("../docs/Refinitiv ESG docs/esg_data_guide.xlsx",
+    field_df <- read_xlsx("data/esg_data_guide.xlsx",
         sheet = "Field Description"
     )
     f2 <- paste("y ~", create_within_interactions(df = df, map_df = field_df))
