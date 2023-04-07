@@ -2,11 +2,18 @@ library(glmnet) ###
 library(tidyverse)
 library(readxl)
 # library(spikeSlabGAM)
+library(snow)
 library(caret)
 library(spikeslab)
 library(pROC)
 source("helper.R")
 source("sparsePC.R")
+
+
+
+
+
+
 
 main <- function() {
     # load data
@@ -15,7 +22,10 @@ main <- function() {
     # scale the numeric columns in the df
     complete_df <- complete_df %>%
         mutate(across(where(is.numeric), scale))
-
+    # creates matrices for glmnets on 3 cases
+    xmats <- create_linear_predictor(complete_df)
+    col_names <- lapply(xmats, colnames)
+    y <- complete_df$y
 
     # store lasso models in a list
     lasso_models <- list()
@@ -24,39 +34,17 @@ main <- function() {
     # store spike models in a list
     spike_models <- list()
 
-    # creates matrices for glmnets on 3 cases
-    xmats <- create_linear_predictor(complete_df)
 
-    # find columns with only 0 or 1
-
-
-    #
-
-
-
-
-
-
-
-    y <- complete_df$y
 
     # turn xmat colnames to numbers for each xmat in xmats
     for (i in seq_along(xmats)) {
         colnames(xmats[[i]]) <- seq(ncol(xmats[[i]]))
     }
 
-    # remove columns with constant values in xmat
     xmats <- lapply(
         xmats,
-        function(x) x[, apply(x, 2, function(x) length(unique(x)) > 1)]
+        function(x) x[, apply(x, 2, function(x) var(x) > 0.01 | var(x) == Inf)]
     )
-    # remove columns with zero variance in xmat
-    xmats <- lapply(
-        xmats,
-        function(x) x[, apply(x, 2, function(x) var(x) > 0.01)]
-    )
-
-
 
     for (i in seq_along(xmats)) {
         # fit the lasso model
@@ -71,13 +59,87 @@ main <- function() {
         rrf_mod <- fit.rrf(y = y, x = xmats[[i]])
         tree_models[[i]] <- rrf_mod
 
-        # fit the spike model, tuning might be required
-
-
-        spike_mod <- fit.ss(y = y, x = xmats[[i]])
-        # sparsePC.spikeslab()
-        spike_models[[i]] <- spike_mod
+        spike_mod <- fit.ss(y = y, x = xmats[[3]])
+        spike_models <- append(spike_models, spike_mod)
     }
+
+    #
+    # load(".RData")
+
+    models <- list(
+        lasso = lasso_models,
+        tree = tree_models,
+        spike = spike_models
+    )
+
+    # extract selected features from model in models
+    for (j in seq_along(models)) {
+        for (i in seq_along(models[[j]])) {
+            # extract selected features from model in models
+            selected_features <- models[[j]][[i]][["selected_features"]]
+            # print 1st 5 selected features
+            print(selected_features[1:10])
+
+            # map selected features to their names
+            selected_features_names <- col_names[[i]][selected_features]
+            print(selected_features_names[1:10])
+            models[[j]][[i]][["selected_features_names"]] <- selected_features_names
+            # save selected features to file
+            # saveRDS(selected_features, paste0("data/selected_features_", model, "_", i, ".Rda"))
+        }
+    }
+    models[[1]][[1]]
+
+
+    # find the intersection of the selected features names for each model
+    for (model_type in seq_along(models)) {
+        # for a given xmat, find the names choosen by each model
+        select_feature_names_list <- lapply()
+    }
+
+    selected_feat_by_model <- lapply(names(models), function(x) models[[x]][[3]][["selected_features_names"]])
+    # find intersection of selected_fet_by_model
+    intersected_features <- Reduce(intersect, selected_feat_by_model)
+    intersected_features
+    # no intersection exists
+
+
+
+    # extract aucs of models into a dataframe
+    results <- data.frame(
+        case = numeric(),
+        model = character(),
+        auc = numeric(),
+        num_features = numeric()
+    )
+
+    for (j in seq_along(models)) {
+        for (i in seq_along(models[[j]])) {
+            # extract auc from model in models
+            auc <- models[[j]][[i]][["auc"]]
+
+            # get length of selected features
+            num_features <- length(models[[j]][[i]][["selected_features"]])
+
+            # accuracy <- models[[j]][[i]][["accuracy"]]
+            # print auc
+            # print(auc)
+            # append auc to results
+            results <- rbind(
+                results,
+                data.frame(
+                    case = i,
+                    model = names(models)[j],
+                    auc = auc,
+                    num_features = num_features
+                )
+            )
+        }
+    }
+    # order results by case
+    results <- results[order(results$case), ]
+    # write results to file
+    write.csv(results, "data/results.csv")
 }
 
 
@@ -131,18 +193,6 @@ fit.lasso <- function(y, xmatrix, plot = FALSE) {
         # should set up the lambda values,
         keep = TRUE
     )
-    # cvlasso$lambda.min
-
-
-    # par(mfrow = c(1, 2))
-    # plot(lasso, xvar = "lambda")
-
-    # abline(v = log(cvlasso$lambda.min), lwd = 4, lty = 2)
-
-    # plot(cvlasso)
-
-    # abline(v = log(cvlasso$lambda.min), lwd = 4, lty = 2)
-    # abline(v = log(cvlasso$lambda.1se), lwd = 4, lty = 2)
 
 
 
@@ -208,7 +258,7 @@ fit.rrf <- function(y, x, optimise = F) {
         # returnResamp="all",
         classProbs = TRUE,
         summaryFunction = twoClassSummary,
-        verboseIter = TRUE,
+        # verboseIter = TRUE,
         allowParallel = TRUE
     )
     levels(y) <- c("no_cont", "cont")
@@ -219,7 +269,7 @@ fit.rrf <- function(y, x, optimise = F) {
     }
 
     grid <- data.frame(
-        mtry = round(sqrt(230)),
+        mtry = round(sqrt(ncol(x))),
         coefReg = 0.8
     )
 
@@ -229,7 +279,7 @@ fit.rrf <- function(y, x, optimise = F) {
         tuneGrid = grid,
         ## This last option is actually one
         ## for gbm() that passes through,
-        metric = "ROC",
+        metrintic = "ROC",
         importance = T
     )
 
@@ -327,6 +377,8 @@ fit.fixedss <- function(y, x, print = FALSE) {
     ))
 }
 fit.ss <- function(y, x, print = FALSE) {
+    # wrapper for spikeslab
+
     # check if y is factor using stopifnot
     stopifnot(is.factor(y))
 
@@ -335,7 +387,8 @@ fit.ss <- function(y, x, print = FALSE) {
         y = y,
         n.rep = 1,
         # testing
-        verbose = print
+        verbose = print,
+        parallel = T
     )
     # sparsePC.spikeslab()
     # sparsePC(x = x_ss, y = y, n.rep = 3, verbose = T)
@@ -401,65 +454,3 @@ fit.ssgam <- function(y, x) {
     #     family = "binomial",
     # )
 }
-
-
-# library(selectiveInference)
-#
-# lambda <- cvlasso$lambda.min
-#
-# n <- nrow(xmatrix)
-#
-# beta <- coef(cvlasso, s = lambda / n)
-#
-# # run inference
-# # maybe we drop the categorical variables here?
-# fixedLassoInf(xmatrix,
-#     as.numeric(y),
-#     family = "binomial",
-#     beta = beta,
-#     lambda = lambda
-# )
-# # Error in checkargs.xy(x, y) : x cannot have duplicate columns
-
-
-
-# #
-#
-# mcmc <- list(
-#     nChains = 4, chainLength = 1000, burnin = 500,
-#     thin = 5
-# )
-# # test_data <- complete_data[, !sapply(complete_data, function(x) length(levels(x)) == 2)]
-#
-# lin_pred <- generate_interaction_formula(complete_df %>% select(-y), num_interaction = 1000)
-#
-# f <- paste("y ~",lin_pred)
-#
-#
-#
-# xmatrix <- model.matrix(y ~ .^2,
-#                         data = complete_df)[, -1]
-#
-# lin_pred <- paste(colnames(xmatrix), sep = " ", collapse = " + ")
-# f <- paste("y ~",lin_pred)
-#
-#
-# # f <- "y ~ TR.SDG7AffordableCleanEnergy1 + TR.SDG8DecentWorkEconomicGrowth1 + TR.SDG9IndustryInnovationInfrastructure1 + TR.SDG10ReducedInequality1 + TR.SDG11SustainableCitiesCommunities1 + TR.SDG12ResponsibleConsumptionProduction1 + TR.SDG13ClimateAction1 + TR.SDG14LifeBelowWater1 + TR.SDG15LifeonLand1 + TR.SDG16PeaceJusticeStrongInstitutions1 + TR.SDG17PartnershipsAchieveGoal1 + TR.SDG7AffordableCleanEnergy1:TR.SDG8DecentWorkEconomicGrowth1 + TR.SDG7AffordableCleanEnergy1:TR.SDG9IndustryInnovationInfrastructure1 + TR.SDG7AffordableCleanEnergy1:TR.SDG10ReducedInequality1"
-#
-# xmatrix <- l[["x_pillar_interaction"]]
-#
-# #for no interactions case# works now
-# # lin_pred <- paste(colnames(complete_df %>% select(-y)), sep = " ", collapse = " + ")
-#
-# interactions <- create_within_interactions(complete_df %>% select(-y), field_df, limit = 500)
-#
-# # lin_pred <- paste(interactions,
-# #                   sep = " ", collapse = " + "
-# #                   )
-# lin_pred <- interactions
-#
-# f2 <- paste("y ~", lin_pred )
-# # f2
-#
-
-#

@@ -61,7 +61,7 @@ fixedSparsePC <- function(
         # X.mean <- as.double(c(apply(X, 2, mean.center, center = TRUE)))
         # X.sd <- as.double(c(apply(X, 2, sd.center, center = TRUE)))
         ss.X <- X
-        pc.out <- svd(X)
+        pc.out <- svd(ss.X)
         U <- pc.out$u
         D <- pc.out$d
         UD <- t(t(U) * D)

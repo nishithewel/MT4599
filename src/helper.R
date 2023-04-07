@@ -1,3 +1,5 @@
+library(readxl)
+
 remove_duplicate <- function(matrix) {
     col_nums <- which(duplicated(as.list(as.data.frame(matrix))))
     return(matrix[, -col_nums])
